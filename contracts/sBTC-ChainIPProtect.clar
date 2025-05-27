@@ -121,3 +121,140 @@
     )
   )
 )
+
+
+
+;; Function to check if a hash is already registered
+(define-read-only (is-hash-registered (ip-hash (buff 32)))
+  (is-some (map-get? registered-hashes { hash: ip-hash }))
+)
+
+;; Smart Contract on Intellectual Property Protection with Expiration Date, Corrected Safety Checks, IP Update Functionality, Owner Verification, and Corrected Expiration Extension
+
+;; function to extend IP registration
+(define-public (extend-ip-registration (ip-id uint) (new-expiration uint))
+  (let
+    (
+      (current-ip-counter (var-get ip-counter))
+      (current-block stacks-block-height)
+    )
+    ;; Perform input validation
+    (asserts! (<= ip-id current-ip-counter) ERR-IP-ID-OUT-OF-RANGE)
+    (asserts! (> ip-id u0) ERR-INVALID-IP-ID)
+    (asserts! (> new-expiration current-block) ERR-INVALID-EXPIRATION)
+
+    (let
+      (
+        (ip-data (map-get? ip-registrations { ip-id: ip-id }))
+      )
+      (asserts! (is-some ip-data) ERR-IP-NOT-FOUND)
+      (let
+        (
+          (unwrapped-ip-data (unwrap-panic ip-data))
+        )
+        (asserts! (is-eq tx-sender (get owner unwrapped-ip-data)) ERR-NOT-AUTHORIZED)
+        (match (get expiration unwrapped-ip-data)
+          current-expiration (if (> new-expiration current-expiration)
+                                (begin
+                                  (map-set ip-registrations
+                                    { ip-id: ip-id }
+                                    (merge unwrapped-ip-data { expiration: (some new-expiration) })
+                                  )
+                                  (ok true)
+                                )
+                                ERR-INVALID-EXPIRATION)
+          (begin
+            (map-set ip-registrations
+              { ip-id: ip-id }
+              (merge unwrapped-ip-data { expiration: (some new-expiration) })
+            )
+            (ok true)
+          )
+        )
+      )
+    )
+  )
+)
+
+;; Function to update IP metadata (hash)
+(define-public (update-ip-metadata (ip-id uint) (new-hash (buff 32)))
+  (let
+    (
+      (current-ip-counter (var-get ip-counter))
+    )
+    ;; Perform input validation
+    (asserts! (<= ip-id current-ip-counter) ERR-IP-ID-OUT-OF-RANGE)
+    (asserts! (> ip-id u0) ERR-INVALID-IP-ID)
+    (asserts! (is-eq (len new-hash) u32) ERR-INVALID-HASH-LENGTH)
+    (asserts! (not (is-eq new-hash 0x0000000000000000000000000000000000000000000000000000000000000000)) ERR-HASH-ALL-ZEROS)
+
+    (let
+      (
+        (ip-data (map-get? ip-registrations { ip-id: ip-id }))
+      )
+      (asserts! (is-some ip-data) ERR-IP-NOT-FOUND)
+      (let
+        (
+          (unwrapped-ip-data (unwrap-panic ip-data))
+          (current-block stacks-block-height)
+        )
+        ;; Check if the caller is the current owner
+        (asserts! (is-eq tx-sender (get owner unwrapped-ip-data)) ERR-NOT-AUTHORIZED)
+        ;; Check if the IP has not expired
+        (asserts! (or
+                    (is-none (get expiration unwrapped-ip-data))
+                    (< current-block (unwrap-panic (get expiration unwrapped-ip-data)))
+                  )
+                  ERR-IP-EXPIRED
+        )
+        ;; Remove the old hash from registered-hashes
+        (map-delete registered-hashes { hash: (get hash unwrapped-ip-data) })
+        ;; Update the IP registration with the new hash
+        (map-set ip-registrations
+          { ip-id: ip-id }
+          (merge unwrapped-ip-data { hash: new-hash })
+        )
+        ;; Add the new hash to registered-hashes
+        (map-set registered-hashes
+          { hash: new-hash }
+          { ip-id: ip-id }
+        )
+        (ok true)
+      )
+    )
+  )
+)
+
+;; Function to verify the current owner of a specific IP ID
+(define-read-only (verify-ip-owner (ip-id uint))
+  (let
+    (
+      (current-ip-counter (var-get ip-counter))
+    )
+    ;; Perform input validation
+    (asserts! (<= ip-id current-ip-counter) ERR-IP-ID-OUT-OF-RANGE)
+    (asserts! (> ip-id u0) ERR-INVALID-IP-ID)
+
+    (let
+      (
+        (ip-data (map-get? ip-registrations { ip-id: ip-id }))
+      )
+      (if (is-some ip-data)
+        (let
+          (
+            (unwrapped-ip-data (unwrap-panic ip-data))
+            (current-block stacks-block-height)
+          )
+          (if (and
+                (is-some (get expiration unwrapped-ip-data))
+                (>= current-block (unwrap-panic (get expiration unwrapped-ip-data)))
+              )
+            ERR-IP-EXPIRED
+            (ok { owner: (get owner unwrapped-ip-data), expiration: (get expiration unwrapped-ip-data) })
+          )
+        )
+        ERR-IP-NOT-FOUND
+      )
+    )
+  )
+)
